@@ -12,9 +12,11 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-c', '--cuda_id', type=int, default=0,
-                    help='dataset')
+                    help='cuda id')
 parser.add_argument('-d', '--dataset', type=str, default='texas',
                     help='dataset')
+parser.add_argument('-a', '--add_edges_ratio', type=float, default=0,
+                    help='add noisy edges ratio')
 args = parser.parse_args()
 
 
@@ -70,6 +72,7 @@ def basic_train(epoch, model, g, features, labels, train_mask, val_mask, test_ma
 if __name__ == "__main__":
     device = 'cuda:{}'.format(args.cuda_id) if args.cuda_id >= 0 else 'cpu'
     dataset = args.dataset
+    add_ratio = args.add_edges_ratio
     # one split_id for example
     # for heterophily datasets, follow the H2GCNs, do not add self_loop
 
@@ -138,6 +141,19 @@ if __name__ == "__main__":
     elif dataset == 'cora':
         data = load_data('cora', device, split_id=0,)
         model = MMP(data.norm_adj, data.x.shape[1], 64, data.num_of_class, num_layers=2, dropout=0.5).to(device)
+        basic_train(1000, model, data.norm_adj, features=data.x, labels=data.y,
+                    train_mask=data.train_mask, val_mask=data.val_mask, test_mask=data.test_mask,
+                    lr=5e-2, weight_decay=5e-4, dur=10, reg_lambda=0)
+
+    elif dataset == 'cora_noisy':
+        data = load_data('cora_noisy', device, add_ratio=add_ratio)
+        model = MMP(data.norm_adj, data.x.shape[1], 64, data.num_of_class, num_layers=2, dropout=0.5).to(device)
+        basic_train(1000, model, data.norm_adj, features=data.x, labels=data.y,
+                    train_mask=data.train_mask, val_mask=data.val_mask, test_mask=data.test_mask,
+                    lr=5e-2, weight_decay=5e-4, dur=10, reg_lambda=0)
+    elif dataset == 'citeseer_noisy':
+        data = load_data('citeseer_noisy', device, add_ratio=add_ratio)
+        model = MMP(data.norm_adj, data.x.shape[1], 64, data.num_of_class, num_layers=2, dropout=0.5, ).to(device)
         basic_train(1000, model, data.norm_adj, features=data.x, labels=data.y,
                     train_mask=data.train_mask, val_mask=data.val_mask, test_mask=data.test_mask,
                     lr=5e-2, weight_decay=5e-4, dur=10, reg_lambda=0)

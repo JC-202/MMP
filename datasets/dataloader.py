@@ -12,7 +12,7 @@ import scipy
 import scipy.io
 
 class MMPData():
-    def __init__(self, pyg_data, device, to_dense=False, to_dgl=False):
+    def __init__(self, pyg_data, device, to_dense=False, to_dgl=False, add_ratio=0):
         self.edge_index = pyg_data.edge_index
         self.x = pyg_data.x
         self.y = pyg_data.y
@@ -26,6 +26,9 @@ class MMPData():
         self.device = device
         self.init_adj(pyg_data.edge_index, to_dense, to_dgl)
         self.init_mask()
+        if add_ratio > 0:
+            self.edge_index = self.add_edges_pyg(self.edge_index, add_ratio)
+            self.init_adj(self.edge_index, to_dense, to_dgl)
 
     def init_adj(self, edge_index, to_dense, to_dgl):
         self.noself_edge_index = remove_self_loop(edge_index)
@@ -58,27 +61,52 @@ class MMPData():
         g = dgl.graph((self.edge_index[0], self.edge_index[1])).to(self.device)
         return g
 
+    def add_edges_pyg(self, edge_index, ratio=0):
+        if ratio == 0:
+            return edge_index
+        adj = SparseTensor(row=edge_index[0, :], col=edge_index[1, :], sparse_sizes=(self.num_of_nodes, self.num_of_nodes))
+        original = adj.to_dense().nonzero()
+        nonzero = (1 - adj.to_dense()).nonzero()
+        add_edges_id = np.random.choice(nonzero.shape[0], int(original.shape[0] * ratio), replace=False)
+        add_edges = nonzero[add_edges_id]
+        row = torch.cat([original[:, 0], add_edges[:, 0]], dim=0)
+        col = torch.cat([original[:, 1], add_edges[:, 1]], dim=0)
+        print('Adding noisy edges:{}%, before:{}, add:{}, now:{}'.format(ratio*100, original.shape[0], add_edges.shape[0], row.shape[0]))
+        edge_index = torch.stack([row, col], dim=0)
+        return edge_index
+
 DATAPATH = path.dirname(path.abspath(__file__))
 
 
-def load_data(data_name, device, split_id=0, to_dense=False, to_dgl=False,):
+def load_data(data_name, device, split_id=0, to_dense=False, to_dgl=False, add_ratio=0):
     data = load_pyg_data(data_name, device, split_id=split_id)
-    data = MMPData(data, device, to_dense, to_dgl, )
+    data = MMPData(data, device, to_dense, to_dgl, add_ratio=add_ratio)
     return data
 
 
+def load_dgl_citation(data_name):
+    if data_name == 'cora':
+        dataset = CoraGraphDataset(verbose=False)
+    elif data_name == 'citeseer':
+        dataset = CiteseerGraphDataset(verbose=False)
+    elif data_name == 'pubmed':
+        dataset = PubmedGraphDataset(verbose=False)
+    g = dataset[0]
+    return g
+
 def load_dgl_data(data_name, device='cpu', split_id=0):
-    if data_name in ['cora', 'citeseer', 'pubmed']:
-        if data_name == 'cora':
-            dataset = CoraGraphDataset(verbose=False)
-        elif data_name == 'citeseer':
-            dataset = CiteseerGraphDataset(verbose=False)
-        elif data_name == 'pubmed':
-            dataset = PubmedGraphDataset(verbose=False)
-        g = dataset[0]
+    if data_name in ['cora', 'citeseer', 'pubmed', 'cora_noisy', 'citeseer_noisy']:
+        noisy = 1 if 'noisy' in data_name else 0
+        data_name = data_name.split('_')[0]
+        g = load_dgl_citation(data_name)
+
+        # standard 20 nodes/class for training
         features, labels, train_mask, val_mask, test_mask = g.ndata['feat'], g.ndata['label'], g.ndata[
             'train_mask'], g.ndata['val_mask'], g.ndata['test_mask']
-        splits, train_mask, val_mask, test_mask = load_pyg_splits(data_name, split_id)
+
+        if noisy == 0:
+            # create random split for clean data
+            splits, train_mask, val_mask, test_mask = load_pyg_splits(data_name, split_id)
     else:
         data = load_pyg_he_data(data_name, split_id)
         dgl_graph = pyg2dgl(data, device)
